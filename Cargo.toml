@@ -1,0 +1,10 @@
+[package]
+name = "sofaia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+iced = "0.14.0"
+tokio = { version = "1.54.1", features = ["fs"] }
+tokio-stream = { version = "0.1.19", features = ["fs"] }
