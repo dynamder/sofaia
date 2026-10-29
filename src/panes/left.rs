@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::panes::middle::FileItem;
 
+#[derive(Debug, Default)]
 pub struct LeftPane;
 
 pub enum LeftPaneVariant {
