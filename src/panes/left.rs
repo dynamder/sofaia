@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use iced::widget::{column, container, text};
 use iced::Element;
+use iced::widget::{column, container, text};
 
 use crate::style::container::RowInput;
 use crate::style::{self, StyleExt};
