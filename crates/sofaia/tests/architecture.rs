@@ -70,7 +70,10 @@ fn style_ext_is_implemented_for_every_widget_the_library_paints() {
     use ericed::style::StyleExt;
     use sofaia::style::{button, container, rule, text};
 
-    fn implemented<W: StyleExt<K>, K>() {}
+    // `'a` is the widget's own lifetime, which is also the lifetime of a
+    // `styled_with` closure: a palette derived per frame may borrow from the
+    // view that is being built.
+    fn implemented<'a, W: StyleExt<'a, K>, K>() {}
 
     implemented::<iced::widget::Container<'static, ()>, container::Kind>();
     implemented::<iced::widget::Text<'static>, text::Kind>();

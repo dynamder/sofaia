@@ -16,6 +16,7 @@
 //! | [`WheelDirection`] | positive `y` means *up*, and nobody remembers | the convention, written once |
 //! | [`WheelArea`] | the wheel is claimed by whatever `Scrollable` is under the pointer | the same claim, reported as a direction instead |
 //! | [`list`] | a list is longer than the window it is drawn in | the slice, its padding and the offset, from one piece of arithmetic |
+//! | [`motion`] | a value has to move, and the clock lives somewhere else | a track that starts on a frame, a frame stream that ends with the motion, and a [`motion::Transform`] that moves pixels without moving layout |
 //!
 //! # The aimed half, in three pieces
 //!
