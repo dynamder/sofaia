@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use iced::{Element, Task, Theme};
 
 use crate::panes::{
@@ -9,6 +7,7 @@ use crate::panes::{
 };
 
 pub mod panes;
+pub mod style;
 
 pub struct App {
     left_pane: LeftPane,

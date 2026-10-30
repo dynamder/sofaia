@@ -3,17 +3,22 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use iced::futures::StreamExt;
-use iced::widget::{column, container, rule, text};
+use iced::widget::{column, container, text};
 use iced::{Element, Task};
 use tokio_stream::wrappers::ReadDirStream;
+
+use crate::style::container::RowInput;
+use crate::style::{self, StyleExt};
 
 pub struct MiddlePane {
     files: Vec<FileItem>,
     current_path: PathBuf,
     dir_stream: Option<ReadDirStream>,
     errors: Vec<anyhow::Error>,
+    cursor: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemType {
     File,
     Folder,
@@ -25,6 +30,21 @@ pub struct FileItem {
     path: PathBuf,
     item_type: ItemType,
     selected: bool,
+}
+
+impl FileItem {
+    pub fn label(&self) -> String {
+        let name = self.path.file_name().map_or_else(
+            || self.path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+
+        match self.item_type {
+            ItemType::Folder => format!("{name}/"),
+            ItemType::SymLink => format!("{name}@"),
+            _ => name,
+        }
+    }
 }
 
 pub enum MiddlePaneMsg {
@@ -41,6 +61,7 @@ impl MiddlePane {
             current_path,
             dir_stream: None,
             errors: Vec::new(),
+            cursor: 0,
         }
     }
     pub fn update(&mut self, message: MiddlePaneMsg) -> Task<MiddlePaneMsg> {
@@ -91,20 +112,27 @@ impl MiddlePane {
     }
 
     pub fn view(&self) -> Element<'_, MiddlePaneMsg> {
-        let mut column = column![
-            text(self.current_path.to_str().unwrap()),
-            rule::horizontal(2),
+        let mut list = column![
+            container(text(self.current_path.display().to_string()))
+                .styled(style::container::pane_header()),
+            style::rule::horizontal(),
         ];
 
-        for item in &self.files {
-            let path = item.path.to_str();
-            if let Some(path) = path {
-                let visual_item = container(text(path));
-                column = column.push(visual_item);
-            }
+        for (index, item) in self.files.iter().enumerate() {
+            let input = RowInput {
+                hovered: false,
+                cursor: index == self.cursor,
+                selected: item.selected,
+            };
+
+            list = list.push(
+                container(text(item.label())).styled(style::container::list_row(input)),
+            );
         }
 
-        column.into()
+        container(list)
+            .styled(style::container::pane())
+            .into()
     }
 }
 
