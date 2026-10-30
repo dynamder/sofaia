@@ -1,9 +1,6 @@
 use iced::widget::text::Style;
-use iced::widget::Text;
-use iced::Theme;
 
-use crate::style::ext::StyleExt;
-use crate::style::tokens::Tokens;
+use ericed::style::{TextRecipe, Tokens};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Size {
@@ -88,8 +85,10 @@ impl Kind {
             error(),
         ]
     }
+}
 
-    pub fn size(self) -> f32 {
+impl TextRecipe for Kind {
+    fn size(&self) -> f32 {
         match self.size {
             Size::Title => 16.0,
             Size::Body => 13.0,
@@ -97,7 +96,7 @@ impl Kind {
         }
     }
 
-    pub fn paint(self, tokens: &Tokens) -> Style {
+    fn paint(&self, tokens: &Tokens) -> Style {
         let color = match self.tone {
             Tone::Normal => tokens.text,
             Tone::Muted => tokens.text_muted,
@@ -107,14 +106,5 @@ impl Kind {
         };
 
         Style { color: Some(color) }
-    }
-}
-
-impl<'a> StyleExt for Text<'a> {
-    type Kind = Kind;
-
-    fn styled(self, kind: Kind) -> Self {
-        self.size(kind.size())
-            .style(move |theme: &Theme| kind.paint(&Tokens::from_theme(theme)))
     }
 }

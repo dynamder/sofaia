@@ -1,5 +1,12 @@
-use iced::theme::palette;
-use iced::{Color, Theme};
+//! The palette every recipe reads.
+//!
+//! Recipes never touch raw colours: they ask for a *role* (`text_muted`,
+//! `surface_hover`, `danger_text`) and get a value that already agrees with the
+//! rest of the application in every theme. Adding a role here is cheap; adding
+//! a `Color::from_rgb(..)` in a recipe is how themes start to rot.
+
+use iced_core::theme::palette;
+use iced_core::{Color, Theme};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
@@ -20,6 +27,7 @@ pub struct Tokens {
     pub danger_text: Color,
     pub info_text: Color,
     pub warning_text: Color,
+    pub scrim: Color,
 }
 
 impl Tokens {
@@ -46,6 +54,12 @@ impl Tokens {
             danger_text: palette::readable(canvas, extended.danger.base.color),
             info_text: palette::readable(canvas, extended.secondary.base.color),
             warning_text: palette::readable(canvas, extended.warning.base.color),
+            // A scrim is the only role that is deliberately translucent: it *is*
+            // a dimming layer, so it has to be.
+            scrim: Color {
+                a: 0.45,
+                ..Color::BLACK
+            },
         }
     }
 }

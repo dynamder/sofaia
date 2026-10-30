@@ -1,0 +1,16 @@
+[package]
+name = "ericed"
+description = "ERgonomic ICED: the parts every iced application writes again."
+readme = "README.md"
+keywords = ["iced", "gui", "widget", "style"]
+categories = ["gui"]
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+# TODO(before publishing): add `license` and `repository`, then flip the
+# workspace's `publish = false`.
+publish.workspace = true
+
+[dependencies]
+iced_core.workspace = true
+iced_widget.workspace = true

@@ -10,6 +10,7 @@ fn main() -> iced::Result {
         .unwrap_or_else(|| PathBuf::from("/"));
 
     iced::application(move || App::new(start.clone()), App::update, App::view)
+        .subscription(App::subscription)
         .theme(App::theme)
         .centered()
         .run()

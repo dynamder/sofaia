@@ -1,23 +1,13 @@
 use iced::widget::container::Style;
-use iced::widget::Container;
-use iced::{Background, Border, Color, Length, Padding, Shadow, Theme};
+use iced::{Background, Border, Color, Shadow};
 
-use crate::style::ext::StyleExt;
-use crate::style::tokens::Tokens;
+use ericed::style::{ContainerRecipe, Frame, Tokens};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct RowInput {
     pub hovered: bool,
     pub cursor: bool,
     pub selected: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Frame {
-    pub padding: Padding,
-    pub width: Length,
-    pub height: Length,
-    pub clip: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,6 +19,10 @@ pub enum Kind {
     Header,
     StatusBar,
     Row(RowInput),
+    /// The context menu's card.
+    Menu,
+    /// The layer that dims everything under a menu.
+    Scrim,
 }
 
 pub fn shell() -> Kind {
@@ -59,6 +53,14 @@ pub fn row(input: RowInput) -> Kind {
     Kind::Row(input)
 }
 
+pub fn menu() -> Kind {
+    Kind::Menu
+}
+
+pub fn scrim() -> Kind {
+    Kind::Scrim
+}
+
 pub fn gap() -> f32 {
     8.0
 }
@@ -77,10 +79,14 @@ impl Kind {
                 cursor: false,
                 selected: false,
             }),
+            Self::Menu,
+            Self::Scrim,
         ]
     }
+}
 
-    pub fn frame(self) -> Frame {
+impl ContainerRecipe for Kind {
+    fn frame(&self) -> Frame {
         match self {
             Kind::Shell => shell::frame(),
             Kind::Sidebar => card::frame(sidebar::width()),
@@ -89,16 +95,20 @@ impl Kind {
             Kind::Header => header::frame(),
             Kind::StatusBar => status_bar::frame(),
             Kind::Row(_) => row::frame(),
+            Kind::Menu => menu::frame(),
+            Kind::Scrim => scrim::frame(),
         }
     }
 
-    pub fn paint(self, tokens: &Tokens) -> Style {
+    fn paint(&self, tokens: &Tokens) -> Style {
         match self {
             Kind::Shell => shell::style(tokens),
             Kind::Sidebar | Kind::Content | Kind::Preview => card::style(tokens),
             Kind::Header => header::style(tokens),
             Kind::StatusBar => status_bar::style(tokens),
-            Kind::Row(input) => row::style(tokens, input),
+            Kind::Row(input) => row::style(tokens, *input),
+            Kind::Menu => menu::style(tokens),
+            Kind::Scrim => scrim::style(tokens),
         }
     }
 }
@@ -125,7 +135,7 @@ mod shell {
     use iced::widget::container::Style;
     use iced::{Border, Length, Padding};
 
-    use super::{base, Frame, Tokens};
+    use super::{Frame, Tokens, base};
 
     pub(super) fn frame() -> Frame {
         Frame {
@@ -145,7 +155,7 @@ mod card {
     use iced::widget::container::Style;
     use iced::{Border, Length, Padding};
 
-    use super::{base, Frame, Tokens};
+    use super::{Frame, Tokens, base};
 
     pub(super) fn frame(width: Length) -> Frame {
         Frame {
@@ -193,7 +203,7 @@ mod header {
     use iced::widget::container::Style;
     use iced::{Border, Length, Padding};
 
-    use super::{base, Frame, Tokens};
+    use super::{Frame, Tokens, base};
 
     pub(super) fn frame() -> Frame {
         Frame {
@@ -213,7 +223,7 @@ mod status_bar {
     use iced::widget::container::Style;
     use iced::{Border, Length, Padding};
 
-    use super::{base, Frame, Tokens};
+    use super::{Frame, Tokens, base};
 
     pub(super) fn frame() -> Frame {
         Frame {
@@ -233,7 +243,7 @@ mod row {
     use iced::widget::container::Style;
     use iced::{Border, Color, Length, Padding};
 
-    use super::{base, Frame, RowInput, Tokens};
+    use super::{Frame, RowInput, Tokens, base};
 
     pub(super) fn frame() -> Frame {
         Frame {
@@ -277,16 +287,69 @@ mod row {
     }
 }
 
-impl<'a, M: 'a> StyleExt for Container<'a, M> {
-    type Kind = Kind;
+mod menu {
+    use iced::widget::container::Style;
+    use iced::{Color, Length, Padding, Shadow, Vector};
 
-    fn styled(self, kind: Kind) -> Self {
-        let frame = kind.frame();
+    use super::{Frame, Tokens};
 
-        self.padding(frame.padding)
-            .width(frame.width)
-            .height(frame.height)
-            .clip(frame.clip)
-            .style(move |theme: &Theme| kind.paint(&Tokens::from_theme(theme)))
+    pub(super) fn frame() -> Frame {
+        Frame {
+            padding: Padding::new(6.0),
+            // Fixed, not `Shrink`: the rows and the header inside are
+            // `Length::Fill`, and a `Fill` child of a `Shrink` parent resolves
+            // to zero width. The whole menu used to collapse into a one-pixel
+            // vertical line because of it.
+            width: Length::Fixed(width()),
+            height: Length::Shrink,
+            clip: true,
+        }
+    }
+
+    fn width() -> f32 {
+        240.0
+    }
+
+    pub(super) fn style(tokens: &Tokens) -> Style {
+        Style {
+            // A menu floats over everything, including the cards it sits on,
+            // so it cannot be the same surface colour as a card.
+            background: Some(iced::Background::Color(tokens.surface_cursor)),
+            text_color: Some(tokens.text),
+            border: iced::Border {
+                color: tokens.border,
+                width: 1.0,
+                radius: 10.0.into(),
+            },
+            shadow: Shadow {
+                color: Color {
+                    a: 0.35,
+                    ..Color::BLACK
+                },
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 16.0,
+            },
+            snap: false,
+        }
+    }
+}
+
+mod scrim {
+    use iced::widget::container::Style;
+    use iced::{Border, Length, Padding};
+
+    use super::{Frame, Tokens, base};
+
+    pub(super) fn frame() -> Frame {
+        Frame {
+            padding: Padding::new(0.0),
+            width: Length::Fill,
+            height: Length::Fill,
+            clip: false,
+        }
+    }
+
+    pub(super) fn style(tokens: &Tokens) -> Style {
+        base(Some(tokens.scrim), tokens.text, Border::default())
     }
 }

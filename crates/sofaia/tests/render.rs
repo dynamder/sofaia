@@ -1,12 +1,22 @@
+//! Screenshots, for the things arithmetic cannot check: spacing, clipping, and
+//! whether the menu really sits over the app instead of inside it.
+//!
+//! The images are written to the workspace's `target/`, so this test is also a
+//! manual review tool: run it, open the PNGs, look at them.
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use iced::{Element, Size, Task, Theme, window};
+
 use sofaia::fs::{DataType, Entry, ItemType};
+use sofaia::intent::{Intent, Row};
 use sofaia::panes::middle::MiddlePane;
 use sofaia::{App, AppMsg};
 
-struct Harness;
+struct Harness {
+    open_menu: bool,
+}
 
 impl iced::Program for Harness {
     type State = App;
@@ -28,7 +38,15 @@ impl iced::Program for Harness {
     }
 
     fn boot(&self) -> (App, Task<AppMsg>) {
-        (fixture(), Task::none())
+        let mut app = fixture();
+
+        if self.open_menu {
+            // The menu is opened through an intent, like everything else: a
+            // screenshot needs no second way into the state.
+            let _ = app.dispatch(Intent::Menu(Row(1)));
+        }
+
+        (app, Task::none())
     }
 
     fn update(&self, state: &mut App, message: AppMsg) -> Task<AppMsg> {
@@ -59,23 +77,40 @@ fn fixture() -> App {
     App::with_panes(MiddlePane::with_entries(root, entries))
 }
 
+/// The workspace's `target/`, not the crate's: the app is not the workspace
+/// root any more.
+fn target_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("crate lives in <workspace>/crates/<crate>")
+        .join("target")
+}
+
 #[test]
 fn render_screenshots() {
-    for (name, theme) in [("dark", Theme::CatppuccinMocha), ("light", Theme::Light)] {
+    let cases = [
+        ("dark", Theme::CatppuccinMocha, false),
+        ("light", Theme::Light, false),
+        ("menu", Theme::CatppuccinMocha, true),
+    ];
+
+    for (name, theme, open_menu) in cases {
         let shot = iced_test::screenshot(
-            &Harness,
+            &Harness { open_menu },
             &theme,
             Size::from((1200, 760)),
             1.0,
             Duration::from_millis(300),
         );
 
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("ui-{name}.png"));
+        let path = target_dir().join(format!("ui-{name}.png"));
         let file = std::fs::File::create(&path).unwrap();
-        let mut encoder =
-            png::Encoder::new(std::io::BufWriter::new(file), shot.size.width, shot.size.height);
+        let mut encoder = png::Encoder::new(
+            std::io::BufWriter::new(file),
+            shot.size.width,
+            shot.size.height,
+        );
 
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);

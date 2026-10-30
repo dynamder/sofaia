@@ -1,10 +1,8 @@
 use iced::theme::palette;
 use iced::widget::button::{self, Style};
-use iced::widget::Button;
-use iced::{Background, Border, Shadow, Theme};
+use iced::{Background, Border, Shadow};
 
-use crate::style::ext::StyleExt;
-use crate::style::tokens::Tokens;
+use ericed::style::{ButtonRecipe, Tokens};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -29,8 +27,10 @@ impl Kind {
     pub fn all() -> &'static [Self] {
         &[Self::Primary, Self::Secondary, Self::Danger]
     }
+}
 
-    pub fn paint(self, tokens: &Tokens, status: button::Status) -> Style {
+impl ButtonRecipe for Kind {
+    fn paint(&self, tokens: &Tokens, status: button::Status) -> Style {
         let (fill, text) = match self {
             Kind::Primary => (tokens.accent, tokens.on_accent),
             Kind::Secondary => (tokens.surface, tokens.text),
@@ -41,9 +41,7 @@ impl Kind {
             button::Status::Active => (fill, text),
             button::Status::Hovered => (palette::mix(fill, text, 0.12), text),
             button::Status::Pressed => (palette::mix(fill, text, 0.24), text),
-            button::Status::Disabled => {
-                (palette::mix(fill, tokens.canvas, 0.6), tokens.text_muted)
-            }
+            button::Status::Disabled => (palette::mix(fill, tokens.canvas, 0.6), tokens.text_muted),
         };
 
         Style {
@@ -53,15 +51,5 @@ impl Kind {
             shadow: Shadow::default(),
             snap: false,
         }
-    }
-}
-
-impl<'a, M: 'a> StyleExt for Button<'a, M> {
-    type Kind = Kind;
-
-    fn styled(self, kind: Kind) -> Self {
-        self.style(move |theme: &Theme, status| {
-            kind.paint(&Tokens::from_theme(theme), status)
-        })
     }
 }

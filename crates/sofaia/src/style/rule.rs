@@ -1,9 +1,8 @@
-use iced::widget::rule::{self, Style};
 use iced::widget::Rule;
-use iced::Theme;
+use iced::widget::rule::{self, Style};
 
-use crate::style::ext::StyleExt;
-use crate::style::tokens::Tokens;
+use crate::style::StyleExt;
+use ericed::style::{RuleRecipe, Tokens};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -26,21 +25,15 @@ impl Kind {
     pub fn all() -> &'static [Self] {
         &[Self::Divider]
     }
+}
 
-    pub fn paint(self, tokens: &Tokens) -> Style {
+impl RuleRecipe for Kind {
+    fn paint(&self, tokens: &Tokens) -> Style {
         Style {
             color: tokens.border,
             radius: 0.0.into(),
             fill_mode: rule::FillMode::Full,
             snap: true,
         }
-    }
-}
-
-impl<'a> StyleExt for Rule<'a> {
-    type Kind = Kind;
-
-    fn styled(self, kind: Kind) -> Self {
-        self.style(move |theme: &Theme| kind.paint(&Tokens::from_theme(theme)))
     }
 }

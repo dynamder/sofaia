@@ -1,7 +1,15 @@
+//! The visual language, checked as arithmetic rather than as screenshots.
+//!
+//! These tests belong to the application, not to `ericed`: they assert things
+//! about *this* palette and *these* kinds. The library only guarantees that a
+//! recipe is asked in every theme and in every status — which is why
+//! `every_kind_paints_in_every_theme` is the only structural one.
+
 use iced::widget::button::Status;
 
+use ericed::style::{ButtonRecipe, ContainerRecipe, RuleRecipe, TextRecipe, Tokens};
+
 use sofaia::style::container::{self, RowInput};
-use sofaia::style::tokens::Tokens;
 use sofaia::style::{button, rule, text};
 
 const ALL_STATUSES: &[Status] = &[
@@ -97,6 +105,26 @@ fn row_states_are_distinguishable() {
         assert_eq!(selected.border.width, 0.0, "{theme:?}");
         assert!(cursor.border.width > 0.0, "{theme:?}");
         assert!(both.border.width > 0.0, "{theme:?}");
+    }
+}
+
+#[test]
+fn the_menu_covers_what_it_sits_on() {
+    for theme in iced::Theme::ALL {
+        let tokens = Tokens::from_theme(theme);
+
+        let scrim = container::scrim().paint(&tokens);
+        let menu = container::menu().paint(&tokens);
+        let card = container::content().paint(&tokens);
+
+        // A menu is drawn over cards, so it must not look like one.
+        assert_ne!(menu, card, "{theme:?}");
+        // A scrim has to be translucent: that is the whole point of it.
+        let scrim_fill = match scrim.background.expect("scrim has a fill") {
+            iced::Background::Color(fill) => fill,
+            iced::Background::Gradient(_) => panic!("a scrim is a flat colour"),
+        };
+        assert!(scrim_fill.a < 1.0, "{theme:?}");
     }
 }
 

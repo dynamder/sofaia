@@ -1,5 +1,5 @@
-use iced::widget::{column, container, text};
 use iced::Element;
+use iced::widget::{column, container, text};
 
 use crate::fs::Entry;
 use crate::style::container::RowInput;
