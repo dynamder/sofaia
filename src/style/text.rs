@@ -6,7 +6,14 @@ use crate::style::ext::StyleExt;
 use crate::style::tokens::Tokens;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Kind {
+pub enum Size {
+    Title,
+    Body,
+    Caption,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Tone {
     Normal,
     Muted,
     Info,
@@ -14,44 +21,89 @@ pub enum Kind {
     Error,
 }
 
-pub fn normal() -> Kind {
-    Kind::Normal
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Kind {
+    size: Size,
+    tone: Tone,
+}
+
+pub fn title() -> Kind {
+    Kind {
+        size: Size::Title,
+        tone: Tone::Normal,
+    }
+}
+
+pub fn body() -> Kind {
+    Kind {
+        size: Size::Body,
+        tone: Tone::Normal,
+    }
 }
 
 pub fn muted() -> Kind {
-    Kind::Muted
+    Kind {
+        size: Size::Body,
+        tone: Tone::Muted,
+    }
+}
+
+pub fn caption() -> Kind {
+    Kind {
+        size: Size::Caption,
+        tone: Tone::Muted,
+    }
 }
 
 pub fn info() -> Kind {
-    Kind::Info
+    Kind {
+        size: Size::Body,
+        tone: Tone::Info,
+    }
 }
 
 pub fn warning() -> Kind {
-    Kind::Warning
+    Kind {
+        size: Size::Body,
+        tone: Tone::Warning,
+    }
 }
 
 pub fn error() -> Kind {
-    Kind::Error
+    Kind {
+        size: Size::Body,
+        tone: Tone::Error,
+    }
 }
 
 impl Kind {
-    pub fn all() -> &'static [Self] {
-        &[
-            Self::Normal,
-            Self::Muted,
-            Self::Info,
-            Self::Warning,
-            Self::Error,
+    pub fn all() -> [Self; 7] {
+        [
+            title(),
+            body(),
+            muted(),
+            caption(),
+            info(),
+            warning(),
+            error(),
         ]
     }
 
+    pub fn size(self) -> f32 {
+        match self.size {
+            Size::Title => 16.0,
+            Size::Body => 13.0,
+            Size::Caption => 11.0,
+        }
+    }
+
     pub fn paint(self, tokens: &Tokens) -> Style {
-        let color = match self {
-            Kind::Normal => tokens.text,
-            Kind::Muted => tokens.text_muted,
-            Kind::Info => tokens.info_text,
-            Kind::Warning => tokens.warning_text,
-            Kind::Error => tokens.danger_text,
+        let color = match self.tone {
+            Tone::Normal => tokens.text,
+            Tone::Muted => tokens.text_muted,
+            Tone::Info => tokens.info_text,
+            Tone::Warning => tokens.warning_text,
+            Tone::Error => tokens.danger_text,
         };
 
         Style { color: Some(color) }
@@ -62,6 +114,7 @@ impl<'a> StyleExt for Text<'a> {
     type Kind = Kind;
 
     fn styled(self, kind: Kind) -> Self {
-        self.style(move |theme: &Theme| kind.paint(&Tokens::from_theme(theme)))
+        self.size(kind.size())
+            .style(move |theme: &Theme| kind.paint(&Tokens::from_theme(theme)))
     }
 }

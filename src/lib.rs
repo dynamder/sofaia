@@ -1,18 +1,19 @@
-use iced::{Element, Task, Theme};
+use iced::widget::{column, container, row, text};
+use iced::{Element, Length, Task, Theme};
 
 use crate::panes::{
-    left::LeftPane,
+    left,
     middle::{MiddlePane, MiddlePaneMsg},
-    right::RightPane,
+    right,
 };
 
 pub mod panes;
 pub mod style;
 
+use style::StyleExt;
+
 pub struct App {
-    left_pane: LeftPane,
     middle_pane: MiddlePane,
-    right_pane: RightPane,
     theme: Theme,
 }
 
@@ -34,9 +35,7 @@ impl App {
         let middle_pane = MiddlePane::new(init_dir);
         let init_task = Task::done(MiddlePaneMsg::RequestStartReadDir.into());
         let app = App {
-            left_pane: LeftPane::default(),
             middle_pane,
-            right_pane: RightPane::default(),
             theme: Theme::CatppuccinMocha,
         };
         (app, init_task)
@@ -53,7 +52,25 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, AppMsg> {
-        self.middle_pane.view().map(AppMsg::from)
+        let panes = row![
+            container(left::view(self.middle_pane.current_path()))
+                .styled(style::container::sidebar()),
+            container(self.middle_pane.view().map(AppMsg::from))
+                .styled(style::container::content()),
+            container(right::view(self.middle_pane.cursor_item()))
+                .styled(style::container::preview()),
+        ]
+        .spacing(style::container::gap())
+        .height(Length::Fill);
+
+        let status = container(
+            text(format!("{} items", self.middle_pane.len())).styled(style::text::caption()),
+        )
+        .styled(style::container::status_bar());
+
+        container(column![panes, status].spacing(style::container::gap()))
+            .styled(style::container::shell())
+            .into()
     }
 
     pub fn theme(&self) -> Theme {

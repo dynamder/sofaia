@@ -1,5 +1,5 @@
 use std::fs::FileType;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use iced::futures::StreamExt;
@@ -26,6 +26,17 @@ pub enum ItemType {
     Unknown,
 }
 
+impl ItemType {
+    pub fn label(self) -> &'static str {
+        match self {
+            ItemType::File => "File",
+            ItemType::Folder => "Folder",
+            ItemType::SymLink => "Symlink",
+            ItemType::Unknown => "Unknown",
+        }
+    }
+}
+
 pub struct FileItem {
     path: PathBuf,
     item_type: ItemType,
@@ -33,17 +44,27 @@ pub struct FileItem {
 }
 
 impl FileItem {
-    pub fn label(&self) -> String {
-        let name = self.path.file_name().map_or_else(
+    pub fn name(&self) -> String {
+        self.path.file_name().map_or_else(
             || self.path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
-        );
+        )
+    }
 
+    pub fn label(&self) -> String {
         match self.item_type {
-            ItemType::Folder => format!("{name}/"),
-            ItemType::SymLink => format!("{name}@"),
-            _ => name,
+            ItemType::Folder => format!("{}/", self.name()),
+            ItemType::SymLink => format!("{}@", self.name()),
+            _ => self.name(),
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn item_type(&self) -> ItemType {
+        self.item_type
     }
 }
 
@@ -64,6 +85,19 @@ impl MiddlePane {
             cursor: 0,
         }
     }
+
+    pub fn current_path(&self) -> &Path {
+        &self.current_path
+    }
+
+    pub fn cursor_item(&self) -> Option<&FileItem> {
+        self.files.get(self.cursor)
+    }
+
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
     pub fn update(&mut self, message: MiddlePaneMsg) -> Task<MiddlePaneMsg> {
         match message {
             MiddlePaneMsg::RequestStartReadDir => {
@@ -113,8 +147,10 @@ impl MiddlePane {
 
     pub fn view(&self) -> Element<'_, MiddlePaneMsg> {
         let mut list = column![
-            container(text(self.current_path.display().to_string()))
-                .styled(style::container::pane_header()),
+            container(
+                text(self.current_path.display().to_string()).styled(style::text::caption())
+            )
+            .styled(style::container::header()),
             style::rule::horizontal(),
         ];
 
@@ -126,13 +162,12 @@ impl MiddlePane {
             };
 
             list = list.push(
-                container(text(item.label())).styled(style::container::list_row(input)),
+                container(text(item.label()).styled(style::text::body()))
+                    .styled(style::container::row(input)),
             );
         }
 
-        container(list)
-            .styled(style::container::pane())
-            .into()
+        list.into()
     }
 }
 
