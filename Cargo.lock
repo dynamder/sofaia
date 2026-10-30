@@ -760,6 +760,8 @@ name = "ericed"
 version = "0.1.0"
 dependencies = [
  "iced_core",
+ "iced_futures",
+ "iced_runtime",
  "iced_widget",
 ]
 

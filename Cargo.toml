@@ -15,6 +15,11 @@ publish = false
 iced = { version = "0.14.0", features = ["tokio"] }
 iced_core = "0.14"
 iced_widget = "0.14"
+# `window::frames()` and `Subscription` live one layer above the widgets, so
+# `ericed::motion` needs these two to be able to say "a frame is a message".
+# Same versions as the rest of iced, for the same reason as above.
+iced_runtime = "0.14"
+iced_futures = "0.14"
 tokio = { version = "1.54.1", features = ["fs"] }
 iced_test = "0.14"
 png = "0.18"

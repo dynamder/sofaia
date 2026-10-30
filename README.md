@@ -14,7 +14,9 @@ sofaia/
 │   │       ├── aim.rs       # Aim, Aimed<T>, AimExt — one target, one gesture
 │   │       ├── meaning.rs   # Meaning<I> + interpret — what pointing means
 │   │       ├── opaque.rs    # OpaqueExt           — a layer the ones below cannot see
-│   │       ├── wheel.rs     # WheelDirection      — the sign convention, once
+│   │       ├── wheel.rs     # WheelDirection, WheelArea — the sign convention, and who claims it
+│   │       ├── list.rs      # Scroll, Slice, Slots, Fixed, Measured — a list longer than the window
+│   │       ├── motion.rs    # Curve, Track, animate, frames — a value that moves, and its clock
 │   │       └── style/       # StyleExt + Tokens + the recipe traits
 │   └── sofaia/          # the application: the half that only means something here
 │       ├── src/

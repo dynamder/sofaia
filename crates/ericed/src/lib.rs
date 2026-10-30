@@ -5,7 +5,7 @@
 //! > **Nothing here knows anything about the application using it.**
 //!
 //! No target type, no intent type, no pane names, no widths, no colours. What
-//! it does know is the *shape* of four problems every iced application meets:
+//! it does know is the *shape* of six problems every iced application meets:
 //!
 //! | module | the problem | what it fixes |
 //! | --- | --- | --- |
@@ -14,6 +14,8 @@
 //! | [`Meaning`] | a gesture means different things on different components | the rule lives on the target type, not in a table |
 //! | [`OpaqueExt`] | a panel is not a filter, but iced treats it like one | opacity as an explicit marker |
 //! | [`WheelDirection`] | positive `y` means *up*, and nobody remembers | the convention, written once |
+//! | [`WheelArea`] | the wheel is claimed by whatever `Scrollable` is under the pointer | the same claim, reported as a direction instead |
+//! | [`list`] | a list is longer than the window it is drawn in | the slice, its padding and the offset, from one piece of arithmetic |
 //!
 //! # The aimed half, in three pieces
 //!
@@ -33,6 +35,9 @@
 //!   owned by a widget library;
 //! * what a row looks like — that is a visual language, and this crate only
 //!   ships the machinery for one;
+//! * **how tall a row is.** [`list::Fixed`] is told, [`list::Measured`] is
+//!   told an estimate; neither guesses. A row's height is a design decision,
+//!   and a library that guesses it is a library that disagrees with the theme;
 //! * **blanket `From` impls.** A blanket `impl<T, M: From<T>> From<Aimed<T>> for
 //!   M` would make every application's own adapter impossible. The `From` space
 //!   is left empty on purpose.
@@ -51,6 +56,8 @@
 //!   arrives **before** the lower layer's `on_exit` — the opposite order from a
 //!   `Column`. Never rely on that order; give each layer its own concern.
 
+pub mod list;
+pub mod motion;
 pub mod style;
 
 mod aim;
@@ -61,4 +68,4 @@ mod wheel;
 pub use aim::{Aim, AimExt, Aimed};
 pub use meaning::{Meaning, interpret};
 pub use opaque::OpaqueExt;
-pub use wheel::WheelDirection;
+pub use wheel::{WheelArea, WheelDirection, wheel_area};

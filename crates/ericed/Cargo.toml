@@ -14,3 +14,7 @@ publish.workspace = true
 [dependencies]
 iced_core.workspace = true
 iced_widget.workspace = true
+# Only `motion::frames` uses these: the frame subscription is a runtime concept,
+# not a widget one.
+iced_runtime.workspace = true
+iced_futures.workspace = true
