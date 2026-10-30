@@ -15,6 +15,22 @@
 //! * [`animate`] is the whole functional interface: a value in, a value out.
 //! * [`Motion`] names "does anything move", so [`frames`] can be the only place
 //!   that decides whether the frame subscription is installed.
+//! * [`translate`] is what a value is *applied* with — a draw-time offset, not a
+//!   layout change.
+//!
+//! # A moving value must not move the layout
+//!
+//! The obvious way to slide something with iced is to put it at an x coordinate:
+//! `pin(content).x(offset)`. It is also wrong, and quietly so: `pin` moves the
+//! *layout node*, and the child is laid out with `limits.max() - position`
+//! available. A pane sliding in from the right is therefore re-laid-out at a
+//! narrower width on every frame — text re-wraps, borders shorten, and the
+//! "animation" is really a resize.
+//!
+//! [`translate`] moves the drawing instead. The child keeps its layout, its
+//! width and its shape, and the offset only reaches the pixels. That is the
+//! difference between an animation and a per-frame relayout, and it is not
+//! something a `Track` can express on its own: a value needs somewhere to go.
 //!
 //! # The clock has two possible owners, and the code is the same
 //!
@@ -47,7 +63,16 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use iced_core::layout;
+use iced_core::mouse;
+use iced_core::overlay;
+use iced_core::renderer;
 use iced_core::time::{Duration, Instant};
+use iced_core::widget::tree::{self, Tree};
+use iced_core::widget::{self, Widget};
+use iced_core::{
+    Clipboard, Element, Event, Layout, Length, Rectangle, Shell, Size, Transformation, Vector,
+};
 use iced_futures::Subscription;
 
 /// A duration and the shape of the motion across it.
@@ -312,6 +337,197 @@ where
     }
 }
 
+/// A widget drawn at an offset, without being laid out at one.
+///
+/// Build one with [`translate`].
+pub struct Translate<'a, Message, Theme = iced_widget::Theme, Renderer = iced_widget::Renderer>
+where
+    Renderer: iced_core::Renderer,
+{
+    content: Element<'a, Message, Theme, Renderer>,
+    offset: Vector,
+}
+
+/// Draws `content` shifted by `offset`, leaving the layout exactly as it was.
+///
+/// This is how a moving value reaches the screen: `offset` is normally
+/// `track.value()` scaled by whatever the animation measures in. Because the
+/// offset is applied while drawing, the child keeps its width and is not
+/// re-laid-out — which is the one thing `pin(..).x(..)` cannot promise.
+///
+/// The catch is that the offset is invisible to layout: the space the content
+/// *would* occupy is still its unshifted box, so a caller that wants the shift
+/// clipped (a pane sliding over its neighbours) must put this inside a clipping
+/// container. Hit testing is adjusted, so the content stays clickable while it
+/// moves.
+pub fn translate<'a, Message, Theme, Renderer>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    offset: Vector,
+) -> Translate<'a, Message, Theme, Renderer>
+where
+    Renderer: iced_core::Renderer,
+{
+    Translate {
+        content: content.into(),
+        offset,
+    }
+}
+
+/// The window-space cursor, moved into the child's unshifted space.
+fn unshift(cursor: mouse::Cursor, offset: Vector) -> mouse::Cursor {
+    cursor * Transformation::translate(-offset.x, -offset.y)
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Translate<'_, Message, Theme, Renderer>
+where
+    Renderer: iced_core::Renderer,
+{
+    fn tag(&self) -> tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    // The whole point: the layout is the child's, untouched by the offset.
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content.as_widget_mut().layout(tree, renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(tree, layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            tree,
+            event,
+            layout,
+            unshift(cursor, self.offset),
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            tree,
+            layout,
+            unshift(cursor, self.offset),
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let shifted = Rectangle {
+            x: viewport.x - self.offset.x,
+            y: viewport.y - self.offset.y,
+            ..*viewport
+        };
+
+        renderer.with_translation(self.offset, |renderer| {
+            self.content.as_widget().draw(
+                tree,
+                renderer,
+                theme,
+                style,
+                layout,
+                unshift(cursor, self.offset),
+                &shifted,
+            );
+        });
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation + self.offset,
+        )
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<Translate<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced_core::Renderer + 'a,
+{
+    fn from(translated: Translate<'a, Message, Theme, Renderer>) -> Self {
+        Self::new(translated)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +645,22 @@ mod tests {
         }
 
         assert!((track.value() - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn translating_does_not_change_the_size() {
+        use iced_core::widget::Widget as _;
+
+        let content: Element<'_, (), iced_widget::Theme, iced_widget::Renderer> =
+            iced_widget::container(iced_widget::text("x")).into();
+
+        let laid_out = content.as_widget().size();
+
+        // A layout-based offset would hand the child a narrower `Limits` and
+        // the size would change with it. A drawing offset must not.
+        let moved = translate(content, Vector::new(120.0, 0.0));
+
+        assert_eq!(moved.size(), laid_out);
     }
 
     #[test]

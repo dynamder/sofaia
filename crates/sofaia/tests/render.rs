@@ -16,6 +16,8 @@ use sofaia::{App, AppMsg};
 
 struct Harness {
     open_menu: bool,
+    /// Navigate to the parent on boot, which starts the slide.
+    navigate: bool,
 }
 
 impl iced::Program for Harness {
@@ -44,6 +46,13 @@ impl iced::Program for Harness {
             // The menu is opened through an intent, like everything else: a
             // screenshot needs no second way into the state.
             let _ = app.dispatch(Intent::Menu(Row(1)));
+        }
+
+        if self.navigate {
+            // Same trick for the slide: a folder change is an intent too. How
+            // far the animation has got by the time the screenshot is taken is
+            // whatever the emulator managed — which is itself worth looking at.
+            let _ = app.dispatch(Intent::Parent);
         }
 
         (app, Task::none())
@@ -90,14 +99,18 @@ fn target_dir() -> PathBuf {
 #[test]
 fn render_screenshots() {
     let cases = [
-        ("dark", Theme::CatppuccinMocha, false),
-        ("light", Theme::Light, false),
-        ("menu", Theme::CatppuccinMocha, true),
+        ("dark", Theme::CatppuccinMocha, false, false),
+        ("light", Theme::Light, false, false),
+        ("menu", Theme::CatppuccinMocha, true, false),
+        ("slide", Theme::CatppuccinMocha, false, true),
     ];
 
-    for (name, theme, open_menu) in cases {
+    for (name, theme, open_menu, navigate) in cases {
         let shot = iced_test::screenshot(
-            &Harness { open_menu },
+            &Harness {
+                open_menu,
+                navigate,
+            },
             &theme,
             Size::from((1200, 760)),
             1.0,

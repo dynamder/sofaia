@@ -5,13 +5,12 @@ use iced::time::Instant;
 use iced::widget::operation;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    column, container, mouse_area, pin, responsive, row, scrollable, sensor, stack, text,
-    text_input,
+    column, container, mouse_area, responsive, row, scrollable, sensor, text, text_input,
 };
-use iced::{Alignment, Element, Length, Size, Task};
+use iced::{Alignment, Element, Length, Size, Task, Vector};
 
 use ericed::list::{self, Scroll, Slice, Slots};
-use ericed::motion::{Curve, Track};
+use ericed::motion::{self, Curve, Track};
 use ericed::{Aim, AimExt, Aimed, Meaning, WheelDirection, wheel_area};
 
 use crate::fs::{self, Entry};
@@ -19,19 +18,16 @@ use crate::intent::{Intent, Motion, Row};
 use crate::style::container::RowInput;
 use crate::style::{self, StyleExt};
 
-/// How long the pane takes to slide one folder across.
-///
-/// Long enough to read as motion, short enough that a vim user who types `l l l`
-/// does not queue up three of them.
+/// How long a folder takes to slide in.
 const SLIDE: Duration = Duration::from_millis(220);
 
-/// What the viewport is assumed to be tall until a `sensor` says otherwise.
+/// The viewport assumed to exist until a `sensor` reports the real one.
 ///
 /// A windowed list cannot draw anything before it knows how tall the window is,
-/// and only the widget tree knows that. The real height arrives as a
-/// `Resized` message during the first redraw — before the first frame is drawn,
-/// so no one sees this — but assuming *nothing* would make the first layout one
-/// row tall, which headless tests then have to work around.
+/// and only the widget tree knows that. The real height arrives as a `Resized`
+/// message during the first redraw — before the first frame is drawn, so no one
+/// sees this — but assuming *nothing* would make the first layout one row tall,
+/// which headless tests then have to work around.
 const VIEWPORT: f32 = 600.0;
 
 /// What pointing at a row means.
@@ -76,30 +72,14 @@ pub struct MiddlePane {
     error: Option<String>,
     /// Where the viewport is, as the app sees it.
     ///
-    /// iced only reports this through `on_scroll`, so it is kept as state; and
-    /// a programmatic scroll has to write it here as well, which is what
-    /// `Scroll::to` is for.
+    /// iced only reports this through `on_scroll`, so it is kept as state; and a
+    /// programmatic scroll has to write it here as well, which is what
+    /// [`Scroll::to`] is for.
     scroll: Scroll,
-    /// The horizontal slide after a folder change.
+    /// The slide after a folder change: 0 off-screen, 1 arrived.
     slide: Track,
-    /// What is sliding out: the listing that was on screen a moment ago.
-    ghost: Option<Ghost>,
-}
-
-/// The listing that is on its way out.
-///
-/// Owned rather than borrowed, because the pane it came from is already loading
-/// the next folder. Moving it across (instead of cloning) is why the animation
-/// costs nothing but the drawing.
-struct Ghost {
-    path: PathBuf,
-    entries: Vec<Entry>,
-    visible: Vec<usize>,
-    cursor: usize,
-    hovered: Option<usize>,
-    scroll: Scroll,
-    /// Which side the new list arrives from: `1.0` when entering a child (so
-    /// this one leaves to the left), `-1.0` when going to the parent.
+    /// Which side the current folder arrived from: `1.0` for a child (it comes
+    /// in from the right), `-1.0` for a parent.
     arrival: f32,
 }
 
@@ -158,7 +138,7 @@ impl MiddlePane {
             scroll: Scroll::at(0.0, VIEWPORT),
             // Settled at the end, so nothing slides on startup.
             slide: Track::new(1.0),
-            ghost: None,
+            arrival: 1.0,
         }
     }
 
@@ -194,9 +174,14 @@ impl MiddlePane {
         self.scroll
     }
 
-    /// Whether anything on this pane is still moving.
+    /// Whether the slide is still running.
     pub fn is_moving(&self) -> bool {
         self.slide.is_moving()
+    }
+
+    /// Advances the slide. Called once per frame message.
+    pub fn tick(&mut self, now: Instant) {
+        self.slide.tick(now);
     }
 
     /// The row `row` of the filtered listing.
@@ -248,7 +233,6 @@ impl MiddlePane {
     /// Scrolls the least amount that puts the cursor back in the window.
     pub fn reveal_cursor(&mut self) -> Task<MiddlePaneMsg> {
         let path = list::fixed(style::container::row_height(), self.visible.len());
-
         let target = path.reveal(self.cursor, &self.scroll);
 
         if (target - self.scroll.y()).abs() < 0.5 {
@@ -271,13 +255,23 @@ impl MiddlePane {
     /// `Escape` while the box is focused is the box's own business (it
     /// unfocuses itself); this is the *unfocused* case, where the listing is
     /// still filtered and the user expects the same key to end that.
-    pub fn clear_search(&mut self) {
+    pub fn clear_search(&mut self) -> Task<MiddlePaneMsg> {
         if self.query.is_empty() {
-            return;
+            return Task::none();
         }
 
         self.query.clear();
-        self.refilter();
+        self.refilter()
+    }
+
+    /// Returns the view to the top: the mirror **and** the widget.
+    ///
+    /// `scroll_to` does not run `on_scroll`, so resetting only the mirror would
+    /// leave the listing built from one offset and drawn at another. The symptom
+    /// looks like a stray scroll: the new content is translated by whatever the
+    /// previous one was scrolled to, so it jumps up before settling.
+    fn reset_view(&mut self) -> Task<MiddlePaneMsg> {
+        operation::scroll_to(Self::list_id(), self.scroll.to(0.0))
     }
 
     /// Puts the cursor on a row, if that row still exists.
@@ -305,18 +299,6 @@ impl MiddlePane {
         self.navigate(parent, -1.0)
     }
 
-    /// Advances the slide. Called once per frame message.
-    pub fn tick(&mut self, now: Instant) {
-        self.slide.tick(now);
-
-        // The listing that was sliding out is finished with; dropping it here
-        // (rather than in `view`, which cannot mutate) is what makes the ghost
-        // disappear on the last frame instead of on the next unrelated rebuild.
-        if !self.slide.is_moving() {
-            self.ghost = None;
-        }
-    }
-
     pub fn update(&mut self, message: MiddlePaneMsg) -> Task<MiddlePaneMsg> {
         match message {
             MiddlePaneMsg::EntryActivated(index) => {
@@ -336,9 +318,7 @@ impl MiddlePane {
             }
             MiddlePaneMsg::EntriesLoaded(Ok(entries)) => {
                 self.entries = entries;
-                self.refilter();
-
-                Task::none()
+                self.refilter()
             }
             MiddlePaneMsg::EntriesLoaded(Err(error)) => {
                 self.error = Some(error);
@@ -366,9 +346,7 @@ impl MiddlePane {
             }
             MiddlePaneMsg::QueryChanged(query) => {
                 self.query = query;
-                self.refilter();
-
-                Task::none()
+                self.refilter()
             }
             // Routed to the application by `AppMsg::from`: the pane has no
             // opinion about what a gesture means, and no target to attach a
@@ -379,35 +357,30 @@ impl MiddlePane {
 
     /// Switches to another folder and starts reading it.
     ///
-    /// The listing is cleared first so the view never shows the previous
-    /// folder's contents under the new path — the previous contents are moved
-    /// into a [`Ghost`] instead, which is what slides out.
+    /// The listing is cleared at once, so the view never shows the previous
+    /// folder's contents under the new path. What makes the change legible is
+    /// the slide: the new listing is drawn arriving from the side the folder
+    /// lives on.
     fn navigate(&mut self, path: PathBuf, arrival: f32) -> Task<MiddlePaneMsg> {
-        if !self.entries.is_empty() {
-            self.ghost = Some(Ghost {
-                path: self.path.clone(),
-                entries: std::mem::take(&mut self.entries),
-                visible: std::mem::take(&mut self.visible),
-                cursor: self.cursor,
-                hovered: self.hovered,
-                scroll: self.scroll,
-                arrival,
-            });
-
+        // Nothing to slide over an empty listing — and nothing to slide into an
+        // empty pane would look like a page that fell in from nowhere.
+        if !self.visible.is_empty() {
+            self.arrival = arrival;
             self.slide = Track::new(0.0).curve(Curve::out(SLIDE));
             self.slide.to(1.0);
         }
 
         self.path = path.clone();
+        self.entries.clear();
+        self.visible.clear();
         self.cursor = 0;
         self.hovered = None;
         self.error = None;
         self.query.clear();
-        // Keep the measured height: the viewport did not change size, and the
-        // sensor only reports when it does.
-        self.scroll = Scroll::at(0.0, self.scroll.height());
 
-        load(path)
+        // No `Scroll::at` here: the scrollable still holds the previous folder's
+        // offset, so the reset has to reach it as well.
+        Task::batch([self.reset_view(), load(path)])
     }
 
     /// Recomputes which entries the query lets through.
@@ -416,7 +389,7 @@ impl MiddlePane {
     /// index would point at an unrelated row — and the view returns to the top.
     /// The viewport height survives, because it is a property of the window and
     /// not of the list.
-    fn refilter(&mut self) {
+    fn refilter(&mut self) -> Task<MiddlePaneMsg> {
         let needle = self.query.trim().to_lowercase();
 
         self.visible = self
@@ -429,7 +402,7 @@ impl MiddlePane {
 
         self.cursor = 0;
         self.hovered = None;
-        self.scroll = Scroll::at(0.0, self.scroll.height());
+        self.reset_view()
     }
 
     fn list_id() -> iced::widget::Id {
@@ -441,120 +414,41 @@ impl MiddlePane {
     }
 
     pub fn view(&self) -> Element<'_, MiddlePaneMsg> {
-        responsive(|size| self.pane(size.width)).into()
-    }
+        responsive(|size| {
+            let offset = self.arrival * (1.0 - self.slide.value()) * size.width;
 
-    /// The pane, with the slide applied.
-    ///
-    /// The translation is a `pin` offset rather than a draw-time transform, so
-    /// the moving content stays in the base layer: a floating transform would be
-    /// hoisted above the context menu, and the menu is allowed to open while
-    /// the slide is still running.
-    fn pane(&self, width: f32) -> Element<'_, MiddlePaneMsg> {
-        let t = self.slide.value();
+            // Drawn, not laid out: the listing keeps its width while it moves, so
+            // nothing re-wraps and the selection box keeps its shape. `pin` would
+            // have laid the pane out at `width - offset` on every frame, which is
+            // a resize wearing an animation's clothes.
+            let listing: Element<'_, MiddlePaneMsg> =
+                motion::translate(self.body(), Vector::new(offset, 0.0)).into();
 
-        let arriving = self.listing(true).body();
-
-        let Some(ghost) = &self.ghost else {
-            return arriving;
-        };
-
-        let leaving = ghost.listing().body();
-
-        // Both layers are exactly as wide as the pane and clipped by it, so a
-        // full-width offset puts one entirely off-screen and the other entirely
-        // on it. At `t == 0` the arriving layer is asked for zero available
-        // width — harmless, because at that moment it is off-screen anyway.
-        stack![
-            pin(container(leaving).width(width)).x(-ghost.arrival * t * width),
-            pin(container(arriving).width(width)).x(ghost.arrival * (1.0 - t) * width),
-        ]
+            listing
+        })
         .into()
     }
 
-    fn listing(&self, interactive: bool) -> Listing<'_> {
-        Listing {
-            path: &self.path,
-            entries: &self.entries,
-            visible: &self.visible,
-            query: Some(&self.query),
-            cursor: self.cursor,
-            hovered: self.hovered,
-            error: self.error.as_deref(),
-            scroll: self.scroll,
-            interactive,
-        }
-    }
-}
-
-impl Ghost {
-    fn listing(&self) -> Listing<'_> {
-        Listing {
-            path: &self.path,
-            entries: &self.entries,
-            visible: &self.visible,
-            // A search box in a ghost would be a second widget with the same
-            // `Id`, and the focus operation would find the wrong one.
-            query: None,
-            cursor: self.cursor,
-            hovered: self.hovered,
-            error: None,
-            scroll: self.scroll,
-            interactive: false,
-        }
-    }
-}
-
-/// One rendering of a listing, from whichever set of fields it happens to have.
-///
-/// The live pane and the ghost draw the same thing; only `interactive` and the
-/// search box differ.
-struct Listing<'a> {
-    path: &'a Path,
-    entries: &'a [Entry],
-    visible: &'a [usize],
-    query: Option<&'a str>,
-    cursor: usize,
-    hovered: Option<usize>,
-    error: Option<&'a str>,
-    scroll: Scroll,
-    interactive: bool,
-}
-
-impl<'a> Listing<'a> {
-    fn body(&self) -> Element<'a, MiddlePaneMsg> {
+    fn body(&self) -> Element<'_, MiddlePaneMsg> {
         let path = list::fixed(style::container::row_height(), self.visible.len());
         let window = path.slice(&self.scroll);
 
-        let rows = self.rows(window);
-        let content = window.surround(rows);
-
-        let listing: Element<'a, MiddlePaneMsg> = if self.interactive {
-            wheel_area(
-                sensor(
-                    scrollable(content)
-                        .id(MiddlePane::list_id())
-                        .on_scroll(MiddlePaneMsg::Scrolled)
-                        .height(Length::Fill),
-                )
-                .on_resize(MiddlePaneMsg::Resized),
-                MiddlePaneMsg::Wheel,
+        let listing = wheel_area(
+            sensor(
+                scrollable(window.surround(self.rows(window)))
+                    .id(Self::list_id())
+                    .on_scroll(MiddlePaneMsg::Scrolled)
+                    .height(Length::Fill),
             )
-            .into()
-        } else {
-            // A ghost is a picture, not a listing: no scrollable, no sensor, no
-            // wheel area. Anything interactive in it would answer the same event
-            // twice — once for the folder that is leaving and once for the one
-            // arriving — and a second `scrollable` would even carry the same
-            // `Id` as the real one.
-            content
-        };
+            .on_resize(MiddlePaneMsg::Resized),
+            MiddlePaneMsg::Wheel,
+        );
 
         let mut body = column![self.header(), style::rule::horizontal()];
 
-        if let Some(error) = self.error {
+        if let Some(error) = &self.error {
             body = body.push(
-                container(text(error.to_owned()).styled(style::text::error()))
+                container(text(error.clone()).styled(style::text::error()))
                     .styled(style::container::row(RowInput::default())),
             );
         }
@@ -568,36 +462,28 @@ impl<'a> Listing<'a> {
             .into()
     }
 
-    fn header(&self) -> Element<'a, MiddlePaneMsg> {
-        let title = text(self.path.display().to_string()).styled(style::text::caption());
-
-        let bar: Element<'a, MiddlePaneMsg> = match self.query {
-            Some(query) => row![
-                title,
-                text_input("search this folder", query)
-                    .id(MiddlePane::search_id())
+    fn header(&self) -> Element<'_, MiddlePaneMsg> {
+        container(
+            row![
+                text(self.path.display().to_string()).styled(style::text::caption()),
+                text_input("search this folder", &self.query)
+                    .id(Self::search_id())
                     .on_input(MiddlePaneMsg::QueryChanged)
                     .width(Length::Fixed(180.0)),
             ]
             .spacing(style::container::gap())
-            .align_y(Alignment::Center)
-            .into(),
-            None => row![title].into(),
-        };
-
-        container(bar).styled(style::container::header()).into()
+            .align_y(Alignment::Center),
+        )
+        .styled(style::container::header())
+        .into()
     }
 
     /// Only the rows the viewport can see, and only those are built.
-    fn rows(&self, window: Slice) -> Element<'a, MiddlePaneMsg> {
+    fn rows(&self, window: Slice) -> Element<'_, MiddlePaneMsg> {
         let mut rows = column![];
 
         for index in window.range() {
-            let Some(entry) = self
-                .visible
-                .get(index)
-                .and_then(|&index| self.entries.get(index))
-            else {
+            let Some(entry) = self.row_entry(index) else {
                 continue;
             };
 
@@ -607,20 +493,14 @@ impl<'a> Listing<'a> {
                 selected: false,
             };
 
-            let row = container(text(entry.label()).styled(style::text::body()))
-                .styled(style::container::row(input));
-
-            let row: Element<'a, MiddlePaneMsg> = if self.interactive {
-                // One target, three gestures: the press and the double click of
-                // the same click cannot disagree about the row.
-                row.aimed(Row(index))
-                    .on_enter(MiddlePaneMsg::Hover(Some(index)))
-                    .into()
-            } else {
-                row.into()
-            };
-
-            rows = rows.push(row);
+            rows = rows.push(
+                container(text(entry.label()).styled(style::text::body()))
+                    .styled(style::container::row(input))
+                    // One target, three gestures: the press and the double click
+                    // of the same click cannot disagree about the row.
+                    .aimed(Row(index))
+                    .on_enter(MiddlePaneMsg::Hover(Some(index))),
+            );
         }
 
         rows.into()
@@ -729,34 +609,6 @@ mod tests {
     }
 
     #[test]
-    fn going_to_the_parent_leaves_a_ghost_until_the_slide_ends() {
-        let mut pane = pane(5);
-        assert!(!pane.is_moving());
-
-        let _ = pane.parent();
-
-        // The slide starts with the folder change, and the listing that was on
-        // screen is what slides out.
-        assert!(pane.is_moving());
-        assert!(pane.ghost.is_some());
-        assert!(pane.is_empty(), "the new folder starts empty");
-        assert_eq!(pane.path(), Path::new("/home"));
-
-        let start = Instant::now();
-        pane.tick(start);
-        assert!(pane.is_moving(), "it has to be drawn at least once");
-
-        pane.tick(start + SLIDE);
-
-        assert!(!pane.is_moving());
-        assert!(
-            pane.ghost.is_none(),
-            "the ghost is dropped on the last frame"
-        );
-        assert_eq!(pane.slide.value(), 1.0);
-    }
-
-    #[test]
     fn revealing_the_cursor_moves_the_view_by_one_row_at_a_time() {
         let mut pane = pane(100);
         pane.scroll.resized(10.0 * ROW);
@@ -777,5 +629,46 @@ mod tests {
         // And again: already visible, so the offset holds.
         let _ = pane.reveal_cursor();
         assert_eq!(pane.scroll().y(), ROW);
+    }
+
+    #[test]
+    fn changing_folders_slides_the_new_listing_in() {
+        let mut pane = pane(5);
+        assert!(!pane.is_moving());
+        assert_eq!(pane.slide.value(), 1.0, "nothing moves on startup");
+
+        let _ = pane.parent();
+
+        // Going up: the new listing arrives from the left.
+        assert_eq!(pane.arrival, -1.0);
+        assert!(pane.is_moving());
+        assert_eq!(pane.slide.value(), 0.0, "it starts off-screen");
+        assert!(pane.is_empty(), "the new folder starts empty");
+        assert_eq!(pane.path(), Path::new("/home"));
+
+        let start = Instant::now();
+        pane.tick(start);
+
+        assert!(pane.is_moving(), "it has to be drawn at least once");
+
+        pane.tick(start + SLIDE);
+
+        assert!(!pane.is_moving());
+        assert_eq!(pane.slide.value(), 1.0, "and it ends where it belongs");
+    }
+
+    #[test]
+    fn entering_a_folder_slides_the_other_way() {
+        let root = PathBuf::from("/home/user");
+        let mut pane = MiddlePane::with_entries(
+            root.clone(),
+            vec![Entry::new(root.join("src"), ItemType::Folder)],
+        );
+
+        let _ = pane.open_cursor();
+
+        // Going down: the new listing arrives from the right.
+        assert_eq!(pane.arrival, 1.0);
+        assert!(pane.is_moving());
     }
 }

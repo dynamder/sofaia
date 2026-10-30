@@ -214,9 +214,7 @@ impl App {
                 // the box captures it and unfocuses itself. So a `Dismiss` at
                 // this level means the box is already out of focus, and what is
                 // left to dismiss is the filter.
-                self.middle.clear_search();
-
-                Task::none()
+                self.middle.clear_search().map(AppMsg::MiddlePane)
             }
         }
     }
