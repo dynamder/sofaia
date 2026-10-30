@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use iced::time::Instant;
 use iced::{Element, Size, Task, Theme, window};
 
 use sofaia::fs::{DataType, Entry, ItemType};
@@ -15,7 +16,9 @@ use sofaia::panes::middle::MiddlePane;
 use sofaia::{App, AppMsg};
 
 struct Harness {
-    open_menu: bool,
+    /// `None` leaves the menu closed; `Some(elapsed)` opens it and advances the
+    /// clock by that much, so a screenshot can be taken *during* the entrance.
+    menu: Option<Duration>,
     /// Navigate to the parent on boot, which starts the slide.
     navigate: bool,
 }
@@ -42,10 +45,19 @@ impl iced::Program for Harness {
     fn boot(&self) -> (App, Task<AppMsg>) {
         let mut app = fixture();
 
-        if self.open_menu {
+        if let Some(elapsed) = self.menu {
             // The menu is opened through an intent, like everything else: a
             // screenshot needs no second way into the state.
             let _ = app.dispatch(Intent::Menu(Row(1)));
+
+            // A screenshot is *one* frame, and the first frame of an entrance is
+            // a menu that has not arrived yet — an invisible scrim over a card at
+            // 96%. So the clock is set explicitly: one tick to start the motion,
+            // one to place it `elapsed` later. `Duration::ZERO` would look like
+            // no menu at all; a second is the settled picture.
+            let now = Instant::now();
+            let _ = app.update(AppMsg::Frame(now));
+            let _ = app.update(AppMsg::Frame(now + elapsed));
         }
 
         if self.navigate {
@@ -99,18 +111,29 @@ fn target_dir() -> PathBuf {
 #[test]
 fn render_screenshots() {
     let cases = [
-        ("dark", Theme::CatppuccinMocha, false, false),
-        ("light", Theme::Light, false, false),
-        ("menu", Theme::CatppuccinMocha, true, false),
-        ("slide", Theme::CatppuccinMocha, false, true),
+        ("dark", Theme::CatppuccinMocha, None, false),
+        ("light", Theme::Light, None, false),
+        (
+            "menu",
+            Theme::CatppuccinMocha,
+            Some(Duration::from_secs(1)),
+            false,
+        ),
+        // The same menu, part-way in: the scrim is dimmer than it will be and
+        // the card is a little small. Two pictures of one value, which is the
+        // whole claim the animation system makes.
+        (
+            "menu-arriving",
+            Theme::CatppuccinMocha,
+            Some(Duration::from_millis(60)),
+            false,
+        ),
+        ("slide", Theme::CatppuccinMocha, None, true),
     ];
 
-    for (name, theme, open_menu, navigate) in cases {
+    for (name, theme, menu, navigate) in cases {
         let shot = iced_test::screenshot(
-            &Harness {
-                open_menu,
-                navigate,
-            },
+            &Harness { menu, navigate },
             &theme,
             Size::from((1200, 760)),
             1.0,

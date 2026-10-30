@@ -9,8 +9,10 @@
 //!    reaches the listing underneath it?
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use iced::Point;
+use iced::time::Instant;
 use iced_test::simulator;
 use iced_test::simulator::click;
 
@@ -41,6 +43,21 @@ fn app() -> App {
     ];
 
     App::with_panes(MiddlePane::with_entries(root, entries))
+}
+
+/// Lets an entrance finish.
+///
+/// A click lands on the picture it can see, and a menu that has just opened is
+/// still scaling up — the card is drawn at 96%, so every coordinate in it is
+/// four percent off until the entrance ends. These tests are about *meaning*
+/// (which press reaches which target), not about the entrance, so they start
+/// from the settled picture: two frames, one to start the motion and one to
+/// finish it, and the instant is chosen here rather than waited for.
+fn settle(app: &mut App) {
+    let start = Instant::now();
+
+    let _ = app.update(AppMsg::Frame(start));
+    let _ = app.update(AppMsg::Frame(start + Duration::from_secs(1)));
 }
 
 #[test]
@@ -96,6 +113,7 @@ fn a_single_click_is_only_a_press() {
 fn a_click_on_the_menu_stays_on_the_menu() {
     let mut app = app();
     let _ = app.dispatch(Intent::Menu(Row(1)));
+    settle(&mut app);
 
     let mut ui = simulator(app.view());
 
@@ -127,6 +145,7 @@ fn a_click_on_the_menu_stays_on_the_menu() {
 fn a_click_outside_the_menu_hits_the_scrim() {
     let mut app = app();
     let _ = app.dispatch(Intent::Menu(Row(1)));
+    settle(&mut app);
 
     let mut ui = simulator(app.view());
 

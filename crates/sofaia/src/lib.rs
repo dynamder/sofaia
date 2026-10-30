@@ -18,7 +18,7 @@
 //! # Note on `impl From<…>` and the orphan rule
 //!
 //! `ericed` deliberately ships **no** blanket `From` impls for
-//! [`Aimed`](ericed::Aimed). If it did, the adapters below would be
+//! [`Aimed`]. If it did, the adapters below would be
 //! impossible — a blanket `impl<T, M: From<T>> From<Aimed<T>> for M` in the
 //! library would collide with every application's own. A library that wants to
 //! be extended must leave the `From` space empty.
@@ -150,7 +150,11 @@ impl App {
             },
             AppMsg::Scroll(direction) => Task::done(AppMsg::Intent(gesture::scroll(direction))),
             AppMsg::Frame(now) => {
+                // Both moving things are advanced from one message, because the
+                // frame is a device fact and the components are the ones that
+                // know what to do with it.
                 self.middle.tick(now);
+                self.menu.tick(now);
 
                 Task::none()
             }
@@ -321,11 +325,14 @@ impl App {
 /// "Is anything in here moving?"
 ///
 /// The one question [`motion::frames`] asks before it installs a frame stream.
-/// A slide is the only thing in this application that moves on its own, so the
-/// answer is the pane's — and when the slide ends, the frames stop.
+/// Two things move on their own: the listing, while it slides to another folder,
+/// and the menu, while its panel arrives. When both are still, the frames stop —
+/// this is the only place that has to be extended when a third one appears, and
+/// forgetting it is a menu that never fades in rather than a window that
+/// redraws forever.
 impl Motion for App {
     fn is_moving(&self) -> bool {
-        self.middle.is_moving()
+        self.middle.is_moving() || self.menu.is_moving()
     }
 }
 

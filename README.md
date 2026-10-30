@@ -16,14 +16,14 @@ sofaia/
 │   │       ├── opaque.rs    # OpaqueExt           — a layer the ones below cannot see
 │   │       ├── wheel.rs     # WheelDirection, WheelArea — the sign convention, and who claims it
 │   │       ├── list.rs      # Scroll, Slice, Slots, Fixed, Measured — a list longer than the window
-│   │       ├── motion.rs    # Curve, Track, animate, frames — a value that moves, and its clock
+│   │       ├── motion.rs    # Curve, Track, frames, transform — a value that moves, its clock, and where it goes
 │   │       └── style/       # StyleExt + Tokens + the recipe traits
 │   └── sofaia/          # the application: the half that only means something here
 │       ├── src/
 │       │   ├── intent.rs    # Motion / Row / Choice / Intent — what the user asked for
 │       │   ├── keys.rs      # Chord  ──► Intent
 │       │   ├── gesture.rs   # wheel ──► Intent (the ambient half)
-│       │   ├── menu.rs      # a simulated context menu, in a Stack
+│       │   ├── menu.rs      # a simulated context menu, in a Stack, with an entrance
 │       │   ├── panes/       # the listing, and where targets come from
 │       │   └── style/       # the visual language: kinds and what they look like
 │       └── tests/
@@ -77,6 +77,21 @@ gesture cannot silently fall into a `_` arm.
 
 Third, the context menu closes through an intent (`Dismiss`), not through event
 forwarding — the scrim is an aimed target like any other.
+
+## What moves, and what a moving value is made of
+
+Two things move on their own, and both are a `Track` in the model:
+
+| what | the value | where it goes |
+| --- | --- | --- |
+| the listing, when the folder changes | 0 → 1 over `SLIDE` | `motion::translate`, so the pane slides without being re-laid-out |
+| the menu panel, when it opens | 0 → 1 over `ENTRANCE` | `Tokens::fade` for the scrim and the card, `motion::scale` for the card |
+
+Neither is a special case in the framework: `update` advances the track when a
+frame message arrives, `view` reads `track.value()`, and painting is a plain
+function of that number. `App::is_moving` is the only place that has to know a
+third animation exists — it is what decides whether the frame subscription is
+installed at all.
 
 ## How input becomes an intent
 

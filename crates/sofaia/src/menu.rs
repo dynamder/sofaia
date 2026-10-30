@@ -27,10 +27,28 @@
 //! invented for it. It still cannot be clicked *through*, because the card is
 //! opaque — a press on a placeholder lands on the card and stops there. That is
 //! exactly how a disabled menu item behaves, and it costs zero lines of policy.
+//!
+//! # Why only the entrance is animated
+//!
+//! Opening starts a [`Track`], and the panel arrives by two means of the same
+//! value: the scrim's alpha and the card's size. Neither touches layout — a card
+//! drawn at 96% still occupies 100% of its box — so nothing underneath moves
+//! while it arrives.
+//!
+//! Closing is immediate, and that is deliberate: a fade-out would leave the
+//! scrim over a listing that is already listening for presses, and a layer that
+//! dims without blocking is worse than no layer at all. An exit animation needs
+//! a state that is *not* the open one and *not* the closed one; ericed ships no
+//! policy for that, and this menu does not invent one.
 
+use std::time::Duration;
+
+use iced::time::Instant;
 use iced::widget::{column, container, space, text};
 use iced::{Element, Fill};
 
+use ericed::motion::{self, Curve, Track};
+use ericed::style::Tokens;
 use ericed::{Aim, AimExt, Meaning, OpaqueExt};
 
 use crate::AppMsg;
@@ -38,10 +56,20 @@ use crate::intent::{Choice, Intent, Row};
 use crate::style::container::RowInput;
 use crate::style::{self, StyleExt};
 
+/// How long the panel takes to arrive.
+const ENTRANCE: Duration = Duration::from_millis(160);
+
+/// How small the panel starts, as a fraction of its size.
+///
+/// Small enough to read as "it came in", large enough that the text keeps its
+/// shape: the card is *drawn* smaller while being *laid out* at full size, so
+/// nothing re-wraps on the way.
+const POP: f32 = 0.96;
+
 /// A region of the menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
-    /// A clickable line of the panel, by its index in [`LINES`].
+    /// A clickable line of the panel, by its index in `LINES`.
     Item(usize),
     /// The dimming layer that covers everything else.
     Scrim,
@@ -109,6 +137,11 @@ const LINES: &[Line] = &[
 
 pub struct Menu {
     open: Option<Open>,
+    /// The entrance: 0 while the panel is arriving, 1 once it has.
+    ///
+    /// A plain [`Track`] in the model, like the listing's slide: `update`
+    /// advances it, `view` reads it, and nothing inside a widget reads a clock.
+    entrance: Track,
 }
 
 struct Open {
@@ -126,7 +159,11 @@ impl Default for Menu {
 
 impl Menu {
     pub fn new() -> Self {
-        Self { open: None }
+        Self {
+            open: None,
+            // Settled: a menu that is not on screen has nothing to animate.
+            entrance: Track::new(1.0),
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -135,10 +172,29 @@ impl Menu {
 
     pub fn open(&mut self, row: Row, title: String) {
         self.open = Some(Open { row, title });
+
+        // A fresh track each time, because the previous entrance finished at 1:
+        // reusing it would pop the panel in at full size on the second opening.
+        self.entrance = Track::new(0.0).curve(Curve::out(ENTRANCE));
+        self.entrance.to(1.0);
     }
 
     pub fn close(&mut self) {
         self.open = None;
+    }
+
+    /// Advances the entrance. Called once per frame message, while it moves.
+    pub fn tick(&mut self, now: Instant) {
+        self.entrance.tick(now);
+    }
+
+    /// Whether the panel is still arriving.
+    ///
+    /// A closed menu answers `false` even if its track was interrupted: nothing
+    /// is on screen, so nothing needs a frame. That check is what stops a menu
+    /// dismissed mid-entrance from keeping the window redrawing.
+    pub fn is_moving(&self) -> bool {
+        self.is_open() && self.entrance.is_moving()
     }
 
     pub fn row(&self) -> Option<Row> {
@@ -165,9 +221,19 @@ impl Menu {
     /// The dimming layer. It covers the whole window and answers presses aimed
     /// at [`Target::Scrim`], which is how a click outside closes the menu
     /// without the list underneath ever seeing it.
+    ///
+    /// The dimming is a palette, not a layer: iced has no subtree opacity, so
+    /// the entrance fades `Tokens::scrim` — already translucent — rather than
+    /// the drawing. The layer still covers everything from the first frame,
+    /// which is why a click in the corner dismisses a menu that is still
+    /// arriving.
     pub fn scrim(&self) -> Element<'_, AppMsg> {
+        let entrance = self.entrance.value();
+
         container(space())
-            .styled(style::container::scrim())
+            .styled_with(style::container::scrim(), move |theme| {
+                Tokens::from_theme(theme).fade(entrance)
+            })
             .aimed(Target::Scrim)
             .into()
     }
@@ -178,8 +244,14 @@ impl Menu {
     /// layer that positions the card, and a press beside the card must reach the
     /// scrim. The card itself is opaque, so a press on its padding lands
     /// nowhere instead of falling through to the list.
+    ///
+    /// The card is drawn at `POP`…1 of its size while it arrives. It is not
+    /// laid out that way: `motion::scale` moves pixels, not boxes, so the card
+    /// under the pointer is the card that was laid out, and hit testing follows
+    /// the drawing.
     pub fn panel(&self) -> Element<'_, AppMsg> {
         let title = self.title().unwrap_or_default();
+        let entrance = self.entrance.value();
 
         let mut card = column![
             container(text(title.to_owned()).styled(style::text::caption()))
@@ -200,7 +272,13 @@ impl Menu {
                 .styled(style::container::header()),
         );
 
-        let card = container(card).styled(style::container::menu()).opaque();
+        let card = container(card)
+            .styled_with(style::container::menu(), move |theme| {
+                Tokens::from_theme(theme).fade(entrance)
+            })
+            .opaque();
+
+        let card = motion::scale(card, POP + (1.0 - POP) * entrance);
 
         container(card).center_x(Fill).center_y(Fill).into()
     }
@@ -219,5 +297,77 @@ fn item(label: &str, target: Option<Target>) -> Element<'_, AppMsg> {
     match target {
         Some(target) => row.aimed(target).into(),
         None => row.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(millis: u64) -> Instant {
+        Instant::now() + Duration::from_millis(millis)
+    }
+
+    #[test]
+    fn a_closed_menu_holds_no_frames() {
+        let menu = Menu::new();
+
+        assert!(!menu.is_moving());
+        assert_eq!(menu.entrance.value(), 1.0, "nothing moves before it opens");
+    }
+
+    #[test]
+    fn the_panel_arrives_from_smaller_and_stops_when_it_gets_there() {
+        let mut menu = Menu::new();
+
+        menu.open(Row(1), "Projects".to_owned());
+
+        // Declared, so there is something to do…
+        assert!(menu.is_moving());
+        // …but no frame has passed, so nothing has moved yet.
+        assert_eq!(menu.entrance.value(), 0.0);
+
+        let start = at(0);
+        menu.tick(start);
+
+        assert!(menu.is_moving(), "it has to be drawn at least once");
+
+        menu.tick(start + ENTRANCE);
+
+        assert!(!menu.is_moving());
+        assert_eq!(menu.entrance.value(), 1.0, "and it ends where it belongs");
+    }
+
+    #[test]
+    fn the_entrance_restarts_from_nothing_every_time() {
+        let mut menu = Menu::new();
+
+        menu.open(Row(0), "a".to_owned());
+        let start = at(0);
+        menu.tick(start);
+        menu.tick(start + ENTRANCE);
+        assert_eq!(menu.entrance.value(), 1.0);
+
+        menu.close();
+        menu.open(Row(2), "b".to_owned());
+
+        assert_eq!(menu.entrance.value(), 0.0, "the second opening starts over");
+        assert!(menu.is_moving());
+    }
+
+    #[test]
+    fn dismissing_an_arriving_menu_stops_the_frames() {
+        let mut menu = Menu::new();
+
+        menu.open(Row(0), "a".to_owned());
+        menu.tick(at(0));
+
+        // Closed mid-entrance: the track is unfinished, but the menu is gone —
+        // a dimming layer that keeps asking for frames is a bug, not an exit
+        // animation.
+        menu.close();
+
+        assert!(!menu.is_open());
+        assert!(!menu.is_moving());
     }
 }
