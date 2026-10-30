@@ -1,6 +1,9 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use iced::{Element, Size, Task, Theme, window};
+use sofaia::fs::{DataType, Entry, ItemType};
+use sofaia::panes::middle::MiddlePane;
 use sofaia::{App, AppMsg};
 
 struct Harness;
@@ -25,7 +28,7 @@ impl iced::Program for Harness {
     }
 
     fn boot(&self) -> (App, Task<AppMsg>) {
-        App::new()
+        (fixture(), Task::none())
     }
 
     fn update(&self, state: &mut App, message: AppMsg) -> Task<AppMsg> {
@@ -41,6 +44,21 @@ impl iced::Program for Harness {
     }
 }
 
+fn fixture() -> App {
+    let root = PathBuf::from("/home/dynamder");
+    let entries = vec![
+        Entry::new(root.join("Projects"), ItemType::Folder),
+        Entry::new(root.join("Documents"), ItemType::Folder),
+        Entry::new(root.join("Downloads"), ItemType::Folder),
+        Entry::new(root.join("Pictures"), ItemType::Folder),
+        Entry::new(root.join("notes.md"), ItemType::File(DataType::Text)),
+        Entry::new(root.join("cover.png"), ItemType::File(DataType::Image)),
+        Entry::new(root.join("archive.zip"), ItemType::File(DataType::Archive)),
+    ];
+
+    App::with_panes(MiddlePane::with_entries(root, entries))
+}
+
 #[test]
 fn render_screenshots() {
     for (name, theme) in [("dark", Theme::CatppuccinMocha), ("light", Theme::Light)] {
@@ -49,7 +67,7 @@ fn render_screenshots() {
             &theme,
             Size::from((1200, 760)),
             1.0,
-            Duration::from_millis(1500),
+            Duration::from_millis(300),
         );
 
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -1,70 +1,65 @@
+use std::path::PathBuf;
+
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
-use crate::panes::{
-    left,
-    middle::{MiddlePane, MiddlePaneMsg},
-    right,
-};
+use crate::panes::middle::{MiddlePane, MiddlePaneMsg};
+use crate::panes::{left, right};
+use crate::style::StyleExt;
 
+pub mod fs;
 pub mod panes;
 pub mod style;
 
-use style::StyleExt;
-
 pub struct App {
-    middle_pane: MiddlePane,
+    middle: MiddlePane,
     theme: Theme,
 }
 
+#[derive(Debug, Clone)]
 pub enum AppMsg {
-    LeftPane,
     MiddlePane(MiddlePaneMsg),
-    RightPane,
 }
 
 impl From<MiddlePaneMsg> for AppMsg {
-    fn from(value: MiddlePaneMsg) -> Self {
-        AppMsg::MiddlePane(value)
+    fn from(message: MiddlePaneMsg) -> Self {
+        AppMsg::MiddlePane(message)
     }
 }
 
 impl App {
-    pub fn new() -> (Self, Task<AppMsg>) {
-        let init_dir = std::env::current_dir().unwrap();
-        let middle_pane = MiddlePane::new(init_dir);
-        let init_task = Task::done(MiddlePaneMsg::RequestStartReadDir.into());
-        let app = App {
-            middle_pane,
+    pub fn new(start: PathBuf) -> (Self, Task<AppMsg>) {
+        let (middle, task) = MiddlePane::new(start);
+
+        (Self::with_panes(middle), task.map(AppMsg::from))
+    }
+
+    pub fn with_panes(middle: MiddlePane) -> Self {
+        Self {
+            middle,
             theme: Theme::CatppuccinMocha,
-        };
-        (app, init_task)
+        }
     }
 
     pub fn update(&mut self, message: AppMsg) -> Task<AppMsg> {
         match message {
-            AppMsg::LeftPane => Task::none(),
-            AppMsg::MiddlePane(middle_pane_msg) => {
-                self.middle_pane.update(middle_pane_msg).map(AppMsg::from)
-            }
-            AppMsg::RightPane => Task::none(),
+            AppMsg::MiddlePane(message) => self.middle.update(message).map(AppMsg::from),
         }
     }
 
     pub fn view(&self) -> Element<'_, AppMsg> {
         let panes = row![
-            container(left::view(self.middle_pane.current_path()))
-                .styled(style::container::sidebar()),
-            container(self.middle_pane.view().map(AppMsg::from))
+            container(left::view(self.middle.path())).styled(style::container::sidebar()),
+            container(self.middle.view().map(AppMsg::from))
                 .styled(style::container::content()),
-            container(right::view(self.middle_pane.cursor_item()))
+            container(right::view(self.middle.cursor_entry()))
                 .styled(style::container::preview()),
         ]
         .spacing(style::container::gap())
         .height(Length::Fill);
 
         let status = container(
-            text(format!("{} items", self.middle_pane.len())).styled(style::text::caption()),
+            text(format!("{} items", self.middle.len())).styled(style::text::caption()),
         )
         .styled(style::container::status_bar());
 
