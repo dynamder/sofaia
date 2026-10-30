@@ -2,7 +2,6 @@ use iced::Element;
 use iced::widget::{column, container, text};
 
 use crate::fs::Entry;
-use crate::style::container::RowInput;
 use crate::style::{self, StyleExt};
 
 pub fn view<'a, M: 'a>(entry: Option<&'a Entry>) -> Element<'a, M> {
@@ -27,7 +26,5 @@ fn field<'a, M: 'a>(label: &'a str, value: String) -> Element<'a, M> {
         text(value).styled(style::text::body()),
     ];
 
-    container(content)
-        .styled(style::container::row(RowInput::default()))
-        .into()
+    container(content).styled(style::container::field()).into()
 }

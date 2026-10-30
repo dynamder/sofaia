@@ -133,6 +133,24 @@ fn h_walks_up_and_stops_at_the_root() {
 }
 
 #[test]
+fn slash_opens_the_search_box() {
+    let mut app = app();
+
+    // The grammar's job stops at "the box should have the cursor". Everything
+    // after that is the box's: it captures the keys it handles, which is what
+    // lets `j` and `k` be text while it is focused — and what makes an input
+    // method possible at all, since iced enables one per focused widget.
+    assert_eq!(app.feed_chord(Chord::Char('/')), Some(Intent::Search));
+
+    let _ = app.update(AppMsg::Chord(Chord::Char('/')));
+    let _ = app.dispatch(Intent::Search);
+
+    // Nothing about the listing changed: a search is not a navigation.
+    assert_eq!(app.path(), Path::new("/home/user"));
+    assert_eq!(app.cursor(), 0);
+}
+
+#[test]
 fn a_chord_is_forwarded_through_a_task() {
     let mut app = app();
 

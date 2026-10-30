@@ -283,6 +283,12 @@ pub trait Motion {
 /// redraws forever; if it is subscribed conditionally, the condition has to be
 /// somewhere. This is that somewhere.
 ///
+/// `f` has to be a function item or a **non-capturing** closure, because
+/// `Subscription::map` requires a zero-sized mapper (iced checks this at compile
+/// time). A mapper that needs state should be `Subscription::with` instead —
+/// though a frame mapper rarely does, since the state it would want is the
+/// instant it is being handed.
+///
 /// ```no_run
 /// # use ericed::motion::{self, Motion};
 /// # use iced_core::time::Instant;
@@ -293,9 +299,10 @@ pub trait Motion {
 /// # let app = App;
 /// let subscription: Subscription<Message> = motion::frames(&app, Message::Frame);
 /// ```
-pub fn frames<A, Message>(app: &A, f: fn(Instant) -> Message) -> Subscription<Message>
+pub fn frames<A, F, Message>(app: &A, f: F) -> Subscription<Message>
 where
     A: Motion,
+    F: Fn(Instant) -> Message + Clone + iced_futures::MaybeSend + 'static,
     Message: 'static,
 {
     if app.is_moving() {

@@ -80,6 +80,12 @@ impl ChordState {
             }),
             Chord::Char('h') => Some(Intent::Parent),
             Chord::Char('l') => Some(Intent::Open),
+            // `/` is vim's search, and here it means "put the cursor in the
+            // search box". While that box is focused it captures every key it
+            // handles, so this grammar goes quiet on its own — which is also
+            // what makes the input method work: the box, not the window, is
+            // what asks iced for one.
+            Chord::Char('/') => Some(Intent::Search),
             // The keyboard's contribution to dismissal: `Escape` is the one key
             // that means nothing on its own and exactly one thing when
             // something is modal, which is the shape of `Dismiss`.

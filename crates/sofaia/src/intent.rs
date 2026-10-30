@@ -56,6 +56,13 @@ pub struct Choice(pub usize);
 pub enum Intent {
     /// Move the cursor one row.
     Move { motion: Motion },
+    /// Scroll the view one row, without moving the cursor.
+    ///
+    /// The wheel's contribution. It is the one pointer gesture with no target,
+    /// so it cannot arrive through [`Meaning`](ericed::Meaning); and now that
+    /// the listing is windowed, "one row further down the *view*" is a
+    /// different request from "one row further down the *list*".
+    Scroll { motion: Motion },
     /// Put the cursor on a row.
     ///
     /// The mouse's contribution: an absolute address instead of a relative
@@ -67,6 +74,12 @@ pub enum Intent {
     Parent,
     /// Show the context menu for a row.
     Menu(Row),
+    /// Put the cursor in the search box.
+    ///
+    /// The only intent that needs the window's input method: a folder full of
+    /// Chinese names cannot be searched for without one, and iced enables it
+    /// per focused widget rather than per window.
+    Search,
     /// Commit a choice, such as a menu item.
     Choose(Choice),
     /// Close whatever is modal. Reachable from both devices: a press on the

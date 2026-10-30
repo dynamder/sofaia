@@ -19,6 +19,12 @@ pub enum Kind {
     Header,
     StatusBar,
     Row(RowInput),
+    /// A labelled value in the preview: the same surface as a row, but free to
+    /// be as tall as its two lines of text.
+    ///
+    /// A row is a fixed box because the listing is windowed; a field is not, so
+    /// it is a different kind rather than a flag on [`Kind::Row`].
+    Field,
     /// The context menu's card.
     Menu,
     /// The layer that dims everything under a menu.
@@ -49,6 +55,10 @@ pub fn status_bar() -> Kind {
     Kind::StatusBar
 }
 
+pub fn field() -> Kind {
+    Kind::Field
+}
+
 pub fn row(input: RowInput) -> Kind {
     Kind::Row(input)
 }
@@ -65,6 +75,19 @@ pub fn gap() -> f32 {
     8.0
 }
 
+/// The height of a listing row, in pixels.
+///
+/// A row is a *fixed* box, because a windowed list does arithmetic on it: the
+/// geometry that decides which rows to build multiplies this number by an
+/// index, and the style lays the row out with it. Two constants would drift
+/// apart, and the drift would show up as a scrollbar that is subtly wrong.
+///
+/// 28 = 13px body text at the default line height (≈15.6) plus the row's 6px
+/// vertical padding, rounded up.
+pub fn row_height() -> f32 {
+    28.0
+}
+
 impl Kind {
     pub fn all() -> &'static [Self] {
         &[
@@ -79,6 +102,7 @@ impl Kind {
                 cursor: false,
                 selected: false,
             }),
+            Self::Field,
             Self::Menu,
             Self::Scrim,
         ]
@@ -95,6 +119,7 @@ impl ContainerRecipe for Kind {
             Kind::Header => header::frame(),
             Kind::StatusBar => status_bar::frame(),
             Kind::Row(_) => row::frame(),
+            Kind::Field => row::field_frame(),
             Kind::Menu => menu::frame(),
             Kind::Scrim => scrim::frame(),
         }
@@ -107,6 +132,7 @@ impl ContainerRecipe for Kind {
             Kind::Header => header::style(tokens),
             Kind::StatusBar => status_bar::style(tokens),
             Kind::Row(input) => row::style(tokens, *input),
+            Kind::Field => row::style(tokens, RowInput::default()),
             Kind::Menu => menu::style(tokens),
             Kind::Scrim => scrim::style(tokens),
         }
@@ -249,8 +275,22 @@ mod row {
         Frame {
             padding: Padding::new(6.0).horizontal(10.0),
             width: Length::Fill,
-            height: Length::Shrink,
+            // A fixed height, not `Shrink`: the listing is windowed, so its
+            // arithmetic needs every row to be the same box. See
+            // `container::row_height`.
+            height: Length::Fixed(super::row_height()),
             clip: true,
+        }
+    }
+
+    /// A row's surface, sized by its contents.
+    ///
+    /// The preview's fields are two lines of text, so they cannot share the
+    /// listing's fixed box.
+    pub(super) fn field_frame() -> Frame {
+        Frame {
+            height: Length::Shrink,
+            ..frame()
         }
     }
 

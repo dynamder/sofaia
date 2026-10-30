@@ -27,10 +27,11 @@ use std::path::{Path, PathBuf};
 
 use iced::event::{self, Status};
 use iced::keyboard;
-use iced::mouse;
+use iced::time::Instant;
 use iced::widget::{column, container, row, stack, text};
 use iced::{Element, Event, Length, Subscription, Task, Theme, window};
 
+use ericed::motion::{self, Motion};
 use ericed::{Aimed, Meaning, WheelDirection, interpret};
 
 use crate::fs::Entry;
@@ -65,9 +66,17 @@ pub enum AppMsg {
     /// A device-level message: it exists because a `Subscription` can only
     /// produce messages, never state.
     Chord(Chord),
-    /// A wheel turn. Also device-level, and also from the subscription — the
-    /// wheel is the one pointer gesture with no target, so no widget owns it.
+    /// A wheel turn, relayed from the listing's `wheel_area`.
+    ///
+    /// Device-level: the wheel is the one pointer gesture with no target, so
+    /// the listing claims it and the ambient grammar decides what it means.
     Scroll(WheelDirection),
+    /// One frame, with the instant it happened at.
+    ///
+    /// Time enters the application as data, which is what keeps `update` a
+    /// function of its messages. The alternative — a widget reading a clock
+    /// while it draws — is the one thing a replay cannot reproduce.
+    Frame(Instant),
     /// A gesture aimed at a row of the listing, relayed from the pane.
     ///
     /// The payload is a *fact* — which aim, which row — not a conclusion. The
@@ -90,6 +99,10 @@ impl From<MiddlePaneMsg> for AppMsg {
             // the pane's: the pane has no opinion, and `MiddlePane::update`
             // never sees this variant.
             MiddlePaneMsg::Aimed(aimed) => AppMsg::Listing(aimed),
+            // A wheel turn has no target, so it belongs to the ambient
+            // grammar, not to the pane: the pane reports it, the application
+            // interprets it.
+            MiddlePaneMsg::Wheel(direction) => AppMsg::Scroll(direction),
             message => AppMsg::MiddlePane(message),
         }
     }
@@ -136,6 +149,11 @@ impl App {
                 None => Task::none(),
             },
             AppMsg::Scroll(direction) => Task::done(AppMsg::Intent(gesture::scroll(direction))),
+            AppMsg::Frame(now) => {
+                self.middle.tick(now);
+
+                Task::none()
+            }
             AppMsg::Listing(aimed) => interpret_task(aimed),
             AppMsg::Menu(aimed) => interpret_task(aimed),
             AppMsg::Intent(intent) => self.dispatch(intent),
@@ -160,8 +178,12 @@ impl App {
             Intent::Move { motion } => {
                 self.middle.move_cursor(motion);
 
-                Task::none()
+                // The cursor moved; the view follows it. Both are the pane's
+                // business, because only it knows how tall a row is.
+                self.middle.reveal_cursor().map(AppMsg::MiddlePane)
             }
+            Intent::Scroll { motion } => self.middle.scroll_by(motion).map(AppMsg::MiddlePane),
+            Intent::Search => self.middle.focus_search().map(AppMsg::MiddlePane),
             Intent::Focus(row) => {
                 self.middle.focus(row);
 
@@ -188,6 +210,11 @@ impl App {
             Intent::Choose(choice) => self.choose(choice),
             Intent::Dismiss => {
                 self.menu.close();
+                // `Escape` while the search box is focused never arrives here:
+                // the box captures it and unfocuses itself. So a `Dismiss` at
+                // this level means the box is already out of focus, and what is
+                // left to dismiss is the filter.
+                self.middle.clear_search();
 
                 Task::none()
             }
@@ -228,13 +255,21 @@ impl App {
 
     /// The event subscription.
     ///
-    /// One stream, two devices. `listen_with` is used instead of the typed
+    /// One stream, one device. `listen_with` is used instead of the typed
     /// helpers because it hands us the [`Status`] of every event, and that is
     /// the rule that keeps a widget's input out of the grammars: a key that a
-    /// focused widget captured is not ours, and neither is a press that a
-    /// `mouse_area` already turned into a message.
+    /// focused widget captured is not ours. The mouse is not read here at all —
+    /// a press belongs to whatever `mouse_area` it landed in, and the wheel
+    /// belongs to the listing's `wheel_area`.
+    ///
+    /// The frame stream is batched in unconditionally but *installed*
+    /// conditionally: [`motion::frames`] returns nothing while nothing moves,
+    /// which is what keeps an idle window idle.
     pub fn subscription(&self) -> Subscription<AppMsg> {
-        event::listen_with(on_event)
+        Subscription::batch([
+            event::listen_with(on_event),
+            motion::frames(self, AppMsg::Frame),
+        ])
     }
 
     pub fn path(&self) -> &Path {
@@ -243,6 +278,11 @@ impl App {
 
     pub fn cursor(&self) -> usize {
         self.middle.cursor()
+    }
+
+    /// Where the listing's viewport sits, for tests and for status readouts.
+    pub fn scroll(&self) -> f32 {
+        self.middle.scroll().y()
     }
 
     pub fn menu_open(&self) -> bool {
@@ -280,14 +320,24 @@ impl App {
     }
 }
 
+/// "Is anything in here moving?"
+///
+/// The one question [`motion::frames`] asks before it installs a frame stream.
+/// A slide is the only thing in this application that moves on its own, so the
+/// answer is the pane's — and when the slide ends, the frames stop.
+impl Motion for App {
+    fn is_moving(&self) -> bool {
+        self.middle.is_moving()
+    }
+}
+
 /// The single place where iced events enter the application.
 ///
 /// `listen_with` takes a plain `fn`, so this cannot read or write state; all it
 /// does is normalize a device event and drop everything else.
 fn on_event(event: Event, status: Status, _window: window::Id) -> Option<AppMsg> {
     // A widget that captured the event owns it; reading it here as well would
-    // handle the same gesture twice. The rule is the same for both devices —
-    // and for the mouse it is *required*, because `on_press` captures.
+    // handle the same gesture twice.
     if status == Status::Captured {
         return None;
     }
@@ -304,13 +354,10 @@ fn on_event(event: Event, status: Status, _window: window::Id) -> Option<AppMsg>
 
             Some(AppMsg::Chord(chord))
         }
-        // The wheel is the one pointer gesture that still arrives as device
-        // data, because it has no target and no widget owns it. If a
-        // `scrollable` is ever placed under the pointer it captures the wheel
-        // itself and this arm goes quiet — the same ownership rule as for keys.
-        Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-            WheelDirection::read(delta).map(AppMsg::Scroll)
-        }
+        // The wheel is deliberately absent: it is claimed by the listing's
+        // `wheel_area` and arrives as `AppMsg::Wheel`. Reading it here as well
+        // would mean a `scrollable` silently taking it away again — the same
+        // ownership rule as for keys, applied to the pointer.
         _ => None,
     }
 }

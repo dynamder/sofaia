@@ -200,35 +200,58 @@ fn a_press_on_the_scrim_dismisses() {
 // --- the ambient half ------------------------------------------------------
 
 #[test]
-fn the_wheel_is_a_relative_motion() {
+fn the_wheel_is_a_relative_motion_of_the_view() {
     assert_eq!(
         gesture::scroll(WheelDirection::Down),
-        Intent::Move {
+        Intent::Scroll {
             motion: Motion::Next
         }
     );
     assert_eq!(
         gesture::scroll(WheelDirection::Up),
-        Intent::Move {
+        Intent::Scroll {
             motion: Motion::Previous
         }
     );
 }
 
 #[test]
-fn the_wheel_moves_the_cursor_and_stops_at_the_edges() {
-    let mut app = app();
+fn the_wheel_scrolls_the_view_and_leaves_the_cursor_alone() {
+    // Enough rows to be longer than the assumed viewport, so there is something
+    // to scroll through in the first place.
+    let root = PathBuf::from("/home/user");
+    let entries = (0..100)
+        .map(|index| {
+            Entry::new(
+                root.join(format!("file{index:02}.txt")),
+                ItemType::File(DataType::Text),
+            )
+        })
+        .collect();
+
+    let mut app = App::with_panes(MiddlePane::with_entries(root, entries));
 
     let _ = app.dispatch(gesture::scroll(WheelDirection::Down));
-    assert_eq!(app.cursor(), 1);
+
+    // A notch is a scroll. The cursor is what `j`/`k` move, and moving it here
+    // would make the wheel and the keyboard two names for one thing.
+    assert_eq!(app.cursor(), 0);
+    assert_eq!(app.scroll(), 28.0, "one row down");
 
     let _ = app.dispatch(gesture::scroll(WheelDirection::Up));
-    assert_eq!(app.cursor(), 0);
+    assert_eq!(app.scroll(), 0.0);
 
-    // The same clamping as `j`/`k`: a scroll is a motion, so the pane owns the
-    // edges.
+    // Past the top: clamped, never negative. The same clamping as `k`, done by
+    // the pane because it is the only part that knows the content height.
     let _ = app.dispatch(gesture::scroll(WheelDirection::Up));
-    assert_eq!(app.cursor(), 0);
+    assert_eq!(app.scroll(), 0.0);
+
+    // And past the bottom: the last screenful, not one row beyond it.
+    for _ in 0..200 {
+        let _ = app.dispatch(gesture::scroll(WheelDirection::Down));
+    }
+
+    assert_eq!(app.scroll(), 100.0 * 28.0 - 600.0);
 }
 
 #[test]
